@@ -16,8 +16,10 @@ by offering malicious actors an "evergreen" attack vector and a bigger attack su
 
 ### Links
 
+- [JavaScript™ for Acrobat® API Reference](http://wwwimages.adobe.com/content/dam/acom/en/devnet/acrobat/pdfs/js_api_reference.pdf) (2007)
 - [Quickpost: About the Physical and Logical Structure of PDF Files](https://blog.didierstevens.com/2008/04/09/quickpost-about-the-physical-and-logical-structure-of-pdf-files/) by [Didier Stevens](https://twitter.com/DidierStevens) (2008)
 - [How to really obfuscateyour PDF malware](https://static.googleusercontent.com/media/www.zynamics.com/it//downloads/recon_pdf.pdf) by [Sebastian Porst](https://twitter.com/LambdaCube) (2010)
+- [Threat Modelling Adobe PDF](https://www.dst.defence.gov.au/sites/default/files/publications/documents/DSTO-TR-2730.pdf) by Ron Brandis and Luke Steller (2012)
 - [Malicious PDFs | Revealing the Techniques Behind the Attacks](https://www.sentinelone.com/blog/malicious-pdfs-revealing-techniques-behind-attacks/) (2019)
 
 ---
