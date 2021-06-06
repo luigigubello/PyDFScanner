@@ -20,6 +20,7 @@ by offering malicious actors an "evergreen" attack vector and a bigger attack su
 - [Quickpost: About the Physical and Logical Structure of PDF Files](https://blog.didierstevens.com/2008/04/09/quickpost-about-the-physical-and-logical-structure-of-pdf-files/) by [Didier Stevens](https://twitter.com/DidierStevens) (2008)
 - [How to really obfuscateyour PDF malware](https://static.googleusercontent.com/media/www.zynamics.com/it//downloads/recon_pdf.pdf) by [Sebastian Porst](https://twitter.com/LambdaCube) (2010)
 - [Threat Modelling Adobe PDF](https://www.dst.defence.gov.au/sites/default/files/publications/documents/DSTO-TR-2730.pdf) by Ron Brandis and Luke Steller (2012)
+- [Advanced PDF Tricks](https://github.com/angea/PDF101/blob/master/presentations/troopers15/Albertini%2BPfeifle%20-%20Advanced%20PDF%20Tricks.pdf) by [Ange Albertini](https://twitter.com/angealbertini) and [Kurt Pfeifle](https://twitter.com/pdfkungfoo) (2015)
 - [Malicious PDFs | Revealing the Techniques Behind the Attacks](https://www.sentinelone.com/blog/malicious-pdfs-revealing-techniques-behind-attacks/) (2019)
 
 ---
