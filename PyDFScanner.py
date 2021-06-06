@@ -3,6 +3,7 @@ import sys
 import pathlib
 import mimetypes
 import re
+import zlib
 
 
 def check_path(path):
@@ -16,111 +17,77 @@ def check_path(path):
 def pdf_structure(lines):
     structure = {"header": "", "obj": 0, "endobj": 0, "stream": 0, "endstream": 0, "xref": 0, "trailer": 0,
                  "startxref": 0}
-    if b'%PDF-' in lines[0]:
-        version = re.search(rb'%PDF(.*)\n', lines[0]).group(1)
-        structure['header'] = '%PDF' + str(version, 'utf-8')
-    for line in lines:
-        if line.endswith(b' obj\n'):
-            structure['obj'] += 1
-        elif line == b'endobj\n':
-            structure['endobj'] += 1
-        elif line == b'stream\n':
-            structure['stream'] += 1
-        elif line == b'endstream\n':
-            structure['endstream'] += 1
-        elif line == b'xref\n':
-            structure['xref'] += 1
-        elif line == b'trailer\n':
-            structure['trailer'] += 1
-        elif line == b'startxref\n':
-            structure['startxref'] += 1
-        else:
-            continue
+    if b'%PDF-' in lines:
+        version = re.search(rb'%PDF-(\d+.\d+)', lines).group(1)
+        structure['header'] = '%PDF-' + str(version, 'utf-8')
+    structure['obj'] = lines.count(b' obj')
+    structure['endobj'] = lines.count(b'endobj')
+    structure['endstream'] = lines.count(b'endstream')
+    structure['stream'] = lines.count(b'stream') - structure['endstream']
+    structure['xref'] = lines.count(b'xref')
+    structure['trailer'] = lines.count(b'trailer')
+    structure['startxref'] = lines.count(b'startxref')
     return structure
 
 
 def pdf_well_formatted(structure):
     if '%PDF-' not in structure['header'] or structure['obj'] != structure['endobj'] or structure['stream'] != \
-            structure['endstream'] or structure['trailer'] != structure['startxref']:
+            structure['endstream']:
         return False
     else:
         return True
 
 
 def pdf_scan_obj(lines):
+    stream_objects = re.compile(rb'(\d+ \d+) obj(.*?)endobj', re.S)
     objects = {}
-    i = 0
-    am_i_an_object = False
-    current_obj = 0
-    while i < len(lines):
-        if lines[i].endswith(b' obj\n'):
-            current_obj = str(lines[i], 'utf-8').split()[0] + ' ' + str(lines[i], 'utf-8').split()[1]
-            if current_obj not in objects:
-                objects[current_obj] = {"javascript": {"/JavaScript": 0, "/JS": 0, "launchURL": 0,
-                                                       "loadPolicyFile": 0, "openDoc": 0,
-                                                       "openPlayer": 0,
-                                                       "submitForm": 0, "syncAnnotScan": 0},
-                                        "url": {"/URI": 0, "links": []},
-                                        "execution": {"/Launch": 0, "/Win": 0},
-                                        "protocol": {"ftp": 0, "file": 0, "smb": 0, "http": 0, "https": 0,
-                                                     "javascript": 0},
-                                        "encoding": {"/FlateDecode": 0, "/ASCIIHexDecode": 0, "/LZWDecode": 0,
-                                                     "/JBIG2Decode": 0}}
-            am_i_an_object = True
-        elif am_i_an_object and lines[i] != b'endobj\n':
-            if b'/JavaScript' in lines[i]:
-                objects[current_obj]['javascript']['/JavaScript'] += 1
-            if b'/JS' in lines[i]:
-                objects[current_obj]['javascript']['/JS'] += 1
-            if b'.launchURL' in lines[i]:
-                objects[current_obj]['javascript']['launchURL'] += 1
-            if b'.loadPolicyFile' in lines[i]:
-                objects[current_obj]['javascript']['loadPolicyFile'] += 1
-            if b'.openDoc' in lines[i]:
-                objects[current_obj]['javascript']['openDoc'] += 1
-            if b'.openPlayer' in lines[i]:
-                objects[current_obj]['javascript']['openPlayer'] += 1
-            if b'.submitForm' in lines[i]:
-                objects[current_obj]['javascript']['submitForm'] += 1
-            if b'.syncAnnotScan' in lines[i]:
-                objects[current_obj]['javascript']['syncAnnotScan'] += 1
-            if b'/URI' in lines[i] and b'/S' not in lines[i]:
-                objects[current_obj]['url']['/URI'] += 1
-                try:
-                    link = lines[i].split(b'/URI')[-1]
-                    link = re.search(rb'\((.*?)\)', link).group(1)
-                    objects[current_obj]['url']['links'].append(str(link, 'utf-8'))
-                except:
-                    objects[current_obj]['url']['links'].append(b'')
-            if b'/Launch' in lines[i]:
-                objects[current_obj]['execution']['/Launch'] += 1
-            if b'/Win' in lines[i]:
-                objects[current_obj]['execution']['/Win'] += 1
-            if b'ftp:' in lines[i]:
-                objects[current_obj]['protocol']['ftp'] += 1
-            if b'file:' in lines[i]:
-                objects[current_obj]['protocol']['file'] += 1
-            if b'smb:' in lines[i]:
-                objects[current_obj]['protocol']['smb'] += 1
-            if b'http:' in lines[i]:
-                objects[current_obj]['protocol']['http'] += 1
-            if b'https:' in lines[i]:
-                objects[current_obj]['protocol']['https'] += 1
-            if b'javascript:' in lines[i]:
-                objects[current_obj]['protocol']['javascript'] += 1
-            if b'/FlateDecode' in lines[i]:
-                objects[current_obj]['encoding']['/FlateDecode'] += 1
-            if b'/ASCIIHexDecode' in lines[i]:
-                objects[current_obj]['encoding']['/ASCIIHexDecode'] += 1
-            if b'/LZWDecode' in lines[i]:
-                objects[current_obj]['encoding']['/LZWDecode'] += 1
-            if b'/JBIG2Decode' in lines[i]:
-                objects[current_obj]['encoding']['/JBIG2Decode'] += 1
-        elif lines[i] == b'endobj\n':
-            am_i_an_object = False
-        else:
-            pass
-        i += 1
+    for obj in stream_objects.findall(lines):
+        obj = list(obj)
+        my_obj = str(obj[0], 'utf-8')
+        objects[my_obj] = {"javascript": {"/JavaScript": 0, "/JS": 0, "launchURL": 0,
+                                          "loadPolicyFile": 0, "openDoc": 0,
+                                          "openPlayer": 0,
+                                          "submitForm": 0, "syncAnnotScan": 0},
+                           "url": {"/URI": 0, "links": []},
+                           "execution": {"/Launch": 0, "/Win": 0},
+                           "protocol": {"ftp": 0, "file": 0, "smb": 0, "http": 0, "https": 0,
+                                        "javascript": 0},
+                           "encoding": {"/FlateDecode": 0, "/ASCIIHexDecode": 0, "/LZWDecode": 0,
+                                        "/JBIG2Decode": 0}}
+        stream_flatdecode = re.compile(rb'.*?FlateDecode.*?stream(.*?)endstream', re.S)
+        # Try to decode FlateDecode
+        for item in stream_flatdecode.findall(obj[1]):
+            item1 = item.strip(b'\r\n')
+            try:
+                item1 = zlib.decompress(item1)
+                obj[1] = obj[1].replace(b'stream' + item + b'endstream', bytes(item1))
+            except:
+                obj[1] = obj[1].replace(b'stream' + item + b'endstream', b'\x00')
+        objects[my_obj]['javascript']['/JavaScript'] = obj[1].count(b'/JavaScript')
+        objects[my_obj]['javascript']['/JS'] = obj[1].count(b'/JS')
+        objects[my_obj]['javascript']['launchURL'] = obj[1].count(b'.launchURL')
+        objects[my_obj]['javascript']['loadPolicyFile'] = obj[1].count(b'.loadPolicyFile')
+        objects[my_obj]['javascript']['openDoc'] = obj[1].count(b'.openDoc')
+        objects[my_obj]['javascript']['openPlayer'] = obj[1].count(b'.openPlayer')
+        objects[my_obj]['javascript']['submitForm'] = obj[1].count(b'.submitForm')
+        objects[my_obj]['javascript']['syncAnnotScan'] = obj[1].count(b'.syncAnnotScan')
+        stream_uri = re.compile(rb'.*?/S.*?/URI.*?/URI.*?\((.*?)\)', re.S)
+        objects[my_obj]['url']['/URI'] = len(stream_uri.findall(obj[1]))
+        for uri in stream_uri.findall(obj[1]):
+            objects[my_obj]['url']['links'].append(str(uri, 'utf-8'))
+        objects[my_obj]['execution']['/Launch'] = obj[1].count(b'/Launch')
+        if objects[my_obj]['execution']['/Launch'] != 0:
+            objects[my_obj]['execution']['/Win'] = obj[1].count(b'/Win')
+        objects[my_obj]['protocol']['ftp'] = obj[1].count(b'ftp:')
+        objects[my_obj]['protocol']['file'] = obj[1].count(b'file:')
+        objects[my_obj]['protocol']['smb'] = obj[1].count(b'smb:')
+        objects[my_obj]['protocol']['http'] = obj[1].count(b'http:')
+        objects[my_obj]['protocol']['https'] = obj[1].count(b'https:')
+        objects[my_obj]['protocol']['javascript'] = obj[1].count(b'javascript:')
+        objects[my_obj]['encoding']['/FlateDecode'] = obj[1].count(b'/FlateDecode')
+        objects[my_obj]['encoding']['/ASCIIHexDecode'] = obj[1].count(b'/ASCIIHexDecode')
+        objects[my_obj]['encoding']['/LZWDecode'] = obj[1].count(b'/LZWDecode')
+        objects[my_obj]['encoding']['/JBIG2Decode'] = obj[1].count(b'/JBIG2Decode')
     return objects
 
 
@@ -174,7 +141,8 @@ def result_for_human(objects, verbose):
 @click.argument('path')
 @click.option('--json', 'json', is_flag=True, help='Optional. Print JSON result.')
 @click.option('--verbose', '-v', 'verbose', is_flag=True, help='Optional. Verbose mode.')
-def scanpdf(path, json, verbose):
+@click.option('--force', '-f', 'force', is_flag=True, help='Optional. Force analysis in corrupted PDFs.')
+def scanpdf(path, json, verbose, force):
     """
     📡 PyDF Scanner - https://github.com/luigigubello/PyDFScanner
     """
@@ -182,10 +150,10 @@ def scanpdf(path, json, verbose):
         print("Wrong filepath or mimetype.")
         sys.exit(0)
     with open(path, 'rb') as f:
-        lines = f.readlines()
+        lines = f.read()
         structure = pdf_structure(lines)
         well_formatted = pdf_well_formatted(structure)
-        if not well_formatted:
+        if not well_formatted and not force:
             print("\x1b[1;33;49m" + "!! Warning:" + "\x1b[0m" + " not well-formatted document")
         else:
             if not json:
