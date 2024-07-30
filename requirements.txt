@@ -1,1 +1,2 @@
-Click
+click==8.1.6
+python_magic==0.4.27

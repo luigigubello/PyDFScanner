@@ -1,14 +1,17 @@
 import click
 import sys
 import pathlib
-import mimetypes
+import magic
 import re
 import zlib
 
 
 def check_path(path):
     if pathlib.Path(path).is_file():
-        if mimetypes.guess_type(path)[0] == 'application/pdf':
+        # Magic supports files without extension
+        mime = magic.Magic()
+        mime_type = mime.from_file(path)
+        if 'PDF document' in mime_type:
             return True
         else:
             return False
@@ -37,8 +40,19 @@ def pdf_well_formatted(structure):
     else:
         return True
 
+def flatedecode_object(obj_data):
+    stream_flatdecode = re.compile(rb'.*?FlateDecode.*?stream(.*?)endstream', re.S)
+    # Try to decode FlateDecode
+    for item in stream_flatdecode.findall(obj_data):
+        item1 = item.strip(b'\r\n')
+        try:
+            item1 = zlib.decompress(item1)
+            obj_data = obj_data.replace(b'stream' + item + b'endstream', bytes(item1))
+        except:
+            obj_data = obj_data.replace(b'stream' + item + b'endstream', b'\x00')
+    return obj_data  
 
-def pdf_scan_obj(lines):
+def pdf_scan_obj(lines, dump):
     stream_objects = re.compile(rb'(\d+ \d+) obj(.*?)endobj', re.S)
     objects = {}
     for obj in stream_objects.findall(lines):
@@ -54,17 +68,22 @@ def pdf_scan_obj(lines):
                                         "javascript": 0},
                            "encoding": {"/FlateDecode": 0, "/ASCIIHexDecode": 0, "/LZWDecode": 0,
                                         "/JBIG2Decode": 0}}
-        stream_flatdecode = re.compile(rb'.*?FlateDecode.*?stream(.*?)endstream', re.S)
-        # Try to decode FlateDecode
-        for item in stream_flatdecode.findall(obj[1]):
-            item1 = item.strip(b'\r\n')
-            try:
-                item1 = zlib.decompress(item1)
-                obj[1] = obj[1].replace(b'stream' + item + b'endstream', bytes(item1))
-            except:
-                obj[1] = obj[1].replace(b'stream' + item + b'endstream', b'\x00')
+        if dump:
+            objects[my_obj]['javascript']['dump'] = []
+        obj[1] = flatedecode_object(obj[1])
         objects[my_obj]['javascript']['/JavaScript'] = obj[1].count(b'/JavaScript')
         objects[my_obj]['javascript']['/JS'] = obj[1].count(b'/JS')
+        if dump and objects[my_obj]['javascript']['/JS'] > 0:
+            if not re.search(rb'/JS \d+ \d+', obj[1]):
+                objects[my_obj]['javascript']['dump'].append([my_obj ,obj[1].decode('utf-8', 'ignore')])
+            else:
+                obj_ref = re.sub(rb'/JS ', b'', re.search(rb'/JS \d+ \d+', obj[1]).group()).decode('utf-8')
+                for pointed_obj in stream_objects.findall(lines):
+                    pointed_obj = list(pointed_obj)
+                    pointed_obj_num = str(pointed_obj[0], 'utf-8')
+                    if pointed_obj_num == obj_ref:
+                        pointed_obj[1] = flatedecode_object(pointed_obj[1])
+                        objects[my_obj]['javascript']['dump'].append([pointed_obj_num, pointed_obj[1].decode('utf-8', 'ignore')])
         objects[my_obj]['javascript']['launchURL'] = obj[1].count(b'.launchURL')
         objects[my_obj]['javascript']['loadPolicyFile'] = obj[1].count(b'.loadPolicyFile')
         objects[my_obj]['javascript']['openDoc'] = obj[1].count(b'.openDoc')
@@ -91,13 +110,17 @@ def pdf_scan_obj(lines):
     return objects
 
 
-def beautiful_print(result):
+def beautiful_print(result, dump):
     print(
         "/JavaScript: {}\n/JS: {}\n\tlaunchURL: {}\n\tloadPolicyFile: {}\n\topenDoc: {}\n\topenPlayer: {}\n\tsubmitForm: {}\n\tsyncAnnotScan: {}".format(
             result['javascript']['/JavaScript'], result['javascript']['/JS'],
             result['javascript']['launchURL'], result['javascript']['loadPolicyFile'],
             result['javascript']['openDoc'], result['javascript']['openPlayer'],
             result['javascript']['submitForm'], result['javascript']['syncAnnotScan']))
+    if dump and len(result['javascript']['dump']) > 0:
+        print("Dump:")
+        for item in result['javascript']['dump']:
+            print("\tobject: {}\n\tcode:\n {}".format(item[0], item[1]))
     print("/Launch: {}\n/Win: {}".format(result['execution']['/Launch'], result['execution']['/Win']))
     print(
         "/FlateDecode: {}\n/ASCIIHexDecode: {}\n/LZWDecode: {}\n/JBIG2Decode: {}".format(
@@ -111,7 +134,7 @@ def beautiful_print(result):
         result['protocol']['http'], result['protocol']['https'], result['protocol']['javascript']))
 
 
-def result_for_human(objects, verbose):
+def result_for_human(objects, verbose, dump):
     if not verbose:
         result = {"javascript": {"/JavaScript": 0, "/JS": 0, "launchURL": 0,
                                  "loadPolicyFile": 0, "openDoc": 0,
@@ -123,6 +146,8 @@ def result_for_human(objects, verbose):
                                "javascript": 0},
                   "encoding": {"/FlateDecode": 0, "/ASCIIHexDecode": 0, "/LZWDecode": 0,
                                "/JBIG2Decode": 0}}
+        if dump:
+            result['javascript']['dump'] = []
         for item in objects.keys():
             for element in objects[item]['javascript'].keys():
                 result['javascript'][element] += objects[item]['javascript'][element]
@@ -142,7 +167,8 @@ def result_for_human(objects, verbose):
 @click.option('--json', 'json', is_flag=True, help='Optional. Print JSON result.')
 @click.option('--verbose', '-v', 'verbose', is_flag=True, help='Optional. Verbose mode.')
 @click.option('--force', '-f', 'force', is_flag=True, help='Optional. Force analysis in corrupted PDFs.')
-def scanpdf(path, json, verbose, force):
+@click.option('--dump', '-d', 'dump', is_flag=True, help='Optional. Try to dump JS code from the PDF.')
+def scanpdf(path, json, verbose, force, dump):
     """
     📡 PyDF Scanner - https://github.com/luigigubello/PyDFScanner
     """
@@ -159,10 +185,10 @@ def scanpdf(path, json, verbose, force):
             if not json:
                 print("Header: {}".format(structure['header']))
                 print("Objects found: {}".format(structure['obj']))
-                objects = pdf_scan_obj(lines)
-                result = result_for_human(objects, verbose)
+                objects = pdf_scan_obj(lines, dump)
+                result = result_for_human(objects, verbose, dump)
                 if not verbose:
-                    beautiful_print(result)
+                    beautiful_print(result, dump)
                 else:
                     for item in objects.keys():
                         if objects[item]['javascript']['/JavaScript'] + objects[item]['javascript']['/JS'] + \
@@ -172,9 +198,9 @@ def scanpdf(path, json, verbose, force):
                             print("\n\x1b[1;31;49m" + item + " obj" + "\x1b[0m")
                         else:
                             print("\n" + item + " obj")
-                        beautiful_print(objects[item])
+                        beautiful_print(objects[item], dump)
             else:
-                objects = pdf_scan_obj(lines)
+                objects = pdf_scan_obj(lines, dump)
                 result = {"structure": structure, "objects": objects}
                 print(result)
 
